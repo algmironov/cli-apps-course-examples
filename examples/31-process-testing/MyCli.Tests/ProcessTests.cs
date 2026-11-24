@@ -1,4 +1,4 @@
-using System.Text;
+using System.Diagnostics;
 using Xunit;
 
 namespace MyCli.Tests;
@@ -48,13 +48,13 @@ public sealed class ProcessTests
     {
         var root = Path.Combine(Path.GetTempPath(), "cli test " + Guid.NewGuid().ToString("N"));
         var nested = Path.Combine(root, "path with spaces");
-        Directory.CreateDirectory(nested);
         var file = Path.Combine(nested, "sample.cs");
         var original = "first\n  \nsecond\n";
-        await File.WriteAllTextAsync(file, original);
-        await File.WriteAllTextAsync(Path.Combine(nested, "ignore.txt"), "ignored");
         try
         {
+            Directory.CreateDirectory(nested);
+            await File.WriteAllTextAsync(file, original);
+            await File.WriteAllTextAsync(Path.Combine(nested, "ignore.txt"), "ignored");
             foreach (var path in new[] { "path with spaces", nested })
             {
                 var result = await CliProcessRunner.RunAsync(["scan", "--path", path], root);
@@ -65,7 +65,7 @@ public sealed class ProcessTests
             Assert.Equal(original, await File.ReadAllTextAsync(file));
             Assert.Equal("ignored", await File.ReadAllTextAsync(Path.Combine(nested, "ignore.txt")));
         }
-        finally { Directory.Delete(root, recursive: true); }
+        finally { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); }
     }
 
     [Fact]
@@ -87,9 +87,24 @@ public sealed class ProcessTests
     [Fact]
     public async Task Sleep_Timeout_KillsProcess()
     {
+        var stopwatch = Stopwatch.StartNew();
         var result = await CliProcessRunner.RunAsync(["sleep", "--milliseconds", "30000"], timeout: TimeSpan.FromSeconds(1));
+        stopwatch.Stop();
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Elapsed: {stopwatch.Elapsed}");
         Assert.True(result.TimedOut);
         Assert.NotEqual(0, result.ExitCode);
+    }
+
+    [Fact]
+    public async Task Sleep_ExternalCancellation_ThrowsOperationCanceledException()
+    {
+        using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var stopwatch = Stopwatch.StartNew();
+        var error = await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CliProcessRunner.RunAsync(["sleep", "--milliseconds", "30000"],
+                timeout: TimeSpan.FromSeconds(20), cancellationToken: cancellation.Token));
+        Assert.Equal(cancellation.Token, error.CancellationToken);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Elapsed: {stopwatch.Elapsed}");
     }
 
     [Fact]
@@ -101,7 +116,7 @@ public sealed class ProcessTests
     }
 
     [Fact]
-    public async Task InvalidArguments_LargeOutputOnBothStreams_DoesNotDeadlock()
+    public async Task Streams_LargeOutputOnBothStreams_DoesNotDeadlock()
     {
         string[] args = ["streams", "--lines", "20000"];
         var result = await CliProcessRunner.RunAsync(args, timeout: TimeSpan.FromSeconds(30));
