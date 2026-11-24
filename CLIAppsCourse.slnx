@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/examples/31-process-testing/">
+    <Project Path="examples/31-process-testing/MyCli/MyCli.csproj" />
+    <Project Path="examples/31-process-testing/MyCli.Tests/MyCli.Tests.csproj" />
+  </Folder>
+</Solution>
